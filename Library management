@@ -1,0 +1,320 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# +++++ LOAD DATA +++++
+library = pd.read_excel("library_books.xlsx")
+user = pd.read_excel("User_data.xlsx")
+admin = pd.read_excel("Admin_data.xlsx")
+
+# +++++ SAVE FUNCTIONS +++++
+def save_user():
+    user.to_excel("User_data.xlsx", index=False)
+
+def save_library():
+    library.to_excel("library_books.xlsx", index=False)
+
+# +++++ GLOBAL VARIABLES +++++
+Book_ID = np.array(library["Book_ID"])
+U_ID_All = np.array(user["User_ID"])
+U_Pass_All = np.array(user["User_Pass"])
+A_ID_All = np.array(admin["Admin_ID"])
+A_Pass_All = np.array(admin["Admin_pass"])
+
+User_ID = None
+
+# +++++ USER FINE +++++
+def user_fine():
+    user["Issue_Date_1"] = pd.to_datetime(user["Issue_Date_1"], dayfirst=True).dt.normalize()
+    user["Issue_Date_2"] = pd.to_datetime(user["Issue_Date_2"], dayfirst=True).dt.normalize()
+    user["Issue_Date_3"] = pd.to_datetime(user["Issue_Date_3"], dayfirst=True).dt.normalize()
+
+    today = pd.Timestamp.today().normalize()
+
+    g1 = np.where(user["Issue_Date_1"].isna(), 0, (today - user["Issue_Date_1"]).dt.days)
+    g2 = np.where(user["Issue_Date_2"].isna(), 0, (today - user["Issue_Date_2"]).dt.days)
+    g3 = np.where(user["Issue_Date_3"].isna(), 0, (today - user["Issue_Date_3"]).dt.days)
+
+    fine = (
+        np.where(g1 > 14, (g1 - 14) * 2, 0) +
+        np.where(g2 > 14, (g2 - 14) * 2, 0) +
+        np.where(g3 > 14, (g3 - 14) * 2, 0)
+    )
+
+    user["Fine"] = fine.astype(int)
+    save_user()
+
+# +++++ USER +++++
+def login_user():
+    global User_ID
+    user_index = np.argmax(U_ID_All == User_ID)
+
+    task = int(input('''How would you like to proceed?
+
+1. View my account trends (Visuals)
+2. Issue a book
+3. Reissue a book
+4. Return a book
+5. View current fine
+6. Log out
+
+Enter serial number: '''))
+
+    # +++++ TASK 1 - USER VISUAL DATA +++++
+    if task == 1:
+        books, days, fines = [], [], []
+        today = pd.Timestamp.today().normalize()
+
+        for i in range(3):
+            bn = f"Book_Name_{i+1}"
+            bd = f"Issue_Date_{i+1}"
+            if not pd.isna(user.loc[user_index, bn]):
+                d = (today - user.loc[user_index, bd]).days
+                books.append(user.loc[user_index, bn])
+                days.append(d)
+                fines.append((d - 14) * 2 if d > 14 else 0)
+
+        if len(books) > 0:
+            # Changed to Line Chart
+            plt.plot(books, days, marker='o', color='blue', linestyle='-')
+            plt.title("Duration of Book Possession (Days)")
+            plt.ylabel("Days")
+            plt.show()
+
+            plt.plot(books, fines, marker='x', color='red', linestyle='--')
+            plt.title("Fine Accumulation per Book")
+            plt.ylabel("Fine (₹)")
+            plt.show()
+        else:
+            print("Currently, no books are issued to your account.")
+
+        return login_user()
+
+    # +++++ TASK 2 - ISSUE BOOK +++++
+    elif task == 2:
+        b_ID = int(input("Enter ID of the book you want: "))
+        if b_ID not in Book_ID:
+            print("Specified book ID does not exist in our system.")
+            return login_user()
+
+        b_index = np.argmax(Book_ID == b_ID)
+
+        if library.loc[b_index, "Copies"] == 0:
+            print("Sorry, this book is currently out of stock.")
+            return login_user()
+
+        for i in range(3):
+            bn = f"Book_Name_{i+1}"
+            bid = f"Book_ID_{i+1}"
+            bd = f"Issue_Date_{i+1}"
+
+            if pd.isna(user.loc[user_index, bn]):
+                user.loc[user_index, bn] = library.loc[b_index, "Book_Name"]
+                user.loc[user_index, bid] = b_ID
+                user.loc[user_index, bd] = pd.Timestamp.today().normalize()
+
+                library.loc[b_index, "Copies"] -= 1
+                if library.loc[b_index, "Copies"] == 0:
+                    library.loc[b_index, "Status"] = "Issued"
+
+                save_user()
+                save_library()
+                print("Book successfully allocated to your ID.")
+                break
+
+        return login_user()
+
+    # +++++ TASK 3 - REISSUE BOOK +++++
+    elif task == 3:
+        b_ID = int(input("Enter Book ID to renew: "))
+        found = False
+        for i in range(3):
+            bid = f"Book_ID_{i+1}"
+            bd = f"Issue_Date_{i+1}"
+            if user.loc[user_index, bid] == b_ID:
+                user.loc[user_index, bd] = pd.Timestamp.today().normalize()
+                save_user()
+                print("Issue date updated successfully.")
+                found = True
+                break
+        if not found:
+            print("This book is not found in your issued list.")
+        return login_user()
+
+    # +++++ TASK 4 - RETURN BOOK +++++
+    elif task == 4:
+        b_ID = int(input("Enter Book ID to return: "))
+        if b_ID not in Book_ID:
+            print("ID not found.")
+            return login_user()
+
+        b_index = np.argmax(Book_ID == b_ID)
+
+        for i in range(3):
+            bn = f"Book_Name_{i+1}"
+            bid = f"Book_ID_{i+1}"
+            bd = f"Issue_Date_{i+1}"
+
+            if user.loc[user_index, bid] == b_ID:
+                user.loc[user_index, bn] = pd.NA
+                user.loc[user_index, bid] = pd.NA
+                user.loc[user_index, bd] = pd.NaT
+
+                library.loc[b_index, "Copies"] += 1
+                library.loc[b_index, "Status"] = "Available"
+
+                save_user()
+                save_library()
+                print("Book returned to the library successfully.")
+                break
+
+        return login_user()
+
+    # +++++ TASK 5 - CHECK FINE +++++
+    elif task == 5:
+        user_fine()
+        print("Your total pending fine amount is: ₹", user.loc[user_index, "Fine"])
+        return login_user()
+    
+    # +++++ TASK 6 - EXIT +++++
+    elif task == 6:
+        print("Logging out from User Session...")
+        return 0
+    
+    else:
+        print("!!! INCORRECT INPUT OPTION !!!")
+        return login_user()
+
+# +++++ ADMIN +++++
+def login_admin():
+    global user, library, Book_ID
+
+    task = int(input('''Administrative Console:
+
+1. Register new user
+2. Remove existing user
+3. Add or update book stock
+4. Remove book record
+5. View library analytics
+6. Log out
+
+Enter choice: '''))
+
+    # +++++ TASK 1 - CREATE USER +++++
+    if task == 1:
+        uid = int(input("New User ID: "))
+        pwd = int(input("Set Password: "))
+        row = {
+            "User_ID": uid,
+            "User_Pass": pwd,
+            "Book_Name_1": pd.NA, "Book_ID_1": pd.NA, "Issue_Date_1": pd.NaT,
+            "Book_Name_2": pd.NA, "Book_ID_2": pd.NA, "Issue_Date_2": pd.NaT,
+            "Book_Name_3": pd.NA, "Book_ID_3": pd.NA, "Issue_Date_3": pd.NaT,
+            "Fine": 0
+        }
+        user = pd.concat([user, pd.DataFrame([row])], ignore_index=True)
+        save_user()
+        print("New account registered.")
+        return login_admin()
+
+    # +++++ TASK 2 - DELETE USER +++++
+    elif task == 2:
+        uid = int(input("Enter User ID to wipe: "))
+        user.drop(user[user["User_ID"] == uid].index, inplace=True)
+        save_user()
+        print("Account removed from database.")
+        return login_admin()
+
+    # +++++ TASK 3 - INSERT OR UPDATE BOOK +++++
+    elif task == 3:
+        bid = int(input("Enter Book ID: "))
+        copies = int(input("Quantity to add: "))
+
+        if bid in Book_ID:
+            idx = np.argmax(Book_ID == bid)
+            library.loc[idx, "Copies"] += copies
+            library.loc[idx, "Status"] = "Available"
+            print("Stock count updated.")
+        else:
+            name = input("Enter Title: ")
+            price = int(input("Enter Price per unit: "))
+            row = {
+                "Book_ID": bid,
+                "Book_Name": name,
+                "Price": price,
+                "Copies": copies,
+                "Status": "Available"
+            }
+            library = pd.concat([library, pd.DataFrame([row])], ignore_index=True)
+            print("New book record created.")
+
+        save_library()
+        Book_ID = np.array(library["Book_ID"])
+        return login_admin()
+
+    # +++++ TASK 4 - DELETE BOOK +++++
+    elif task == 4:
+        bid = int(input("Enter Book ID to delete permanently: "))
+        library.drop(library[library["Book_ID"] == bid].index, inplace=True)
+        save_library()
+        Book_ID = np.array(library["Book_ID"])
+        print("Book data erased.")
+        return login_admin()
+
+    # +++++ TASK 5 - LIBRARY STATUS +++++
+    elif task == 5:
+        total = len(library)
+        avail = (library["Status"] == "Available").sum()
+        issued = total - avail
+        fine_sum = user["Fine"].sum()
+
+        print("Total Catalogued Books:", total)
+        print("Stock currently on shelves:", avail)
+        print("Books currently borrowed:", issued)
+        print("Sum of all user fines: ₹", fine_sum)
+
+        # Changed from Pie to Horizontal Bar Chart
+        categories = ["Available Stock", "Borrowed Books"]
+        values = [avail, issued]
+        plt.barh(categories, values, color=['green', 'orange'])
+        plt.title("Stock Availability Overview")
+        plt.xlabel("Count")
+        plt.show()
+
+        return login_admin()
+    
+    # +++++ TASK 6 - EXIT ++++++
+    elif task == 6:
+        print("Logging out from Admin Session...")
+        return 0
+    else:
+        print("!!! CHOICE NOT RECOGNIZED !!!")
+        return login_admin()
+
+# +++++ Admin/User Selection +++++
+print("--- Welcome to Library Management System ---")
+choice = int(input("Login as: 1. Member (User) or 2. Staff (Admin): "))
+
+if choice == 1:
+    User_ID = int(input("Provide User ID: "))
+    if User_ID in U_ID_All:
+        pwd = int(input("Provide Password: "))
+        if pwd == U_Pass_All[np.argmax(U_ID_All == User_ID)]:
+            print("--- Member Login Successful ---")
+            login_user()
+        else:
+            print("Incorrect password entered.")
+    else:
+        print("User ID not found.")
+
+elif choice == 2:
+    aid = int(input("Provide Admin ID: "))
+    if aid in A_ID_All:
+        pwd = int(input("Provide Password: "))
+        if pwd == A_Pass_All[np.argmax(A_ID_All == aid)]:
+            print("--- Staff Login Successful ---")
+            login_admin()
+        else:
+            print("Incorrect administrator password.")
+    else:
+        print("Admin ID not found.")
